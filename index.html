@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="可交互的 9F 办公区工位分布图，支持座位安排、搜索、导入导出和打印。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f7fb8'/%3E%3Cpath d='M15 17h34v10H15zm0 20h34v10H15z' fill='white'/%3E%3C/svg%3E">
+<title>9F 工位平面图</title>
+<style>
+  :root{
+    --bg:#eef1f4; --panel:#ffffff; --ink:#1d2830; --sub:#5c6b77; --line:#dce3e9;
+    --chip:#f1f5f8; --accent:#2f7fb8; --danger:#c65353; --shadow:0 12px 32px rgba(15,30,45,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12181d; --panel:#1c242b; --ink:#e8eef3; --sub:#94a4b0; --line:#2b353d;
+      --chip:#242f37; --accent:#58a6d8; --danger:#e07a7a; --shadow:0 12px 32px rgba(0,0,0,.5); }
+  }
+  :root[data-theme="dark"]{ --bg:#12181d; --panel:#1c242b; --ink:#e8eef3; --sub:#94a4b0; --line:#2b353d;
+      --chip:#242f37; --accent:#58a6d8; --danger:#e07a7a; --shadow:0 12px 32px rgba(0,0,0,.5); }
+  :root[data-theme="light"]{ --bg:#eef1f4; --panel:#ffffff; --ink:#1d2830; --sub:#5c6b77; --line:#dce3e9;
+      --chip:#f1f5f8; --accent:#2f7fb8; --danger:#c65353; --shadow:0 12px 32px rgba(15,30,45,.18); }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.5;}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel);}
+  .tt h1{margin:0;font-size:17px;font-weight:700;letter-spacing:.5px}
+  .tt p{margin:2px 0 0;font-size:12px;color:var(--sub)}
+  .chips{display:flex;gap:8px}
+  .chip{background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:4px 12px;
+    font-size:12px;color:var(--sub);white-space:nowrap}
+  .chip b{color:var(--ink);font-variant-numeric:tabular-nums;margin-left:4px;font-size:13px}
+  .chip.ok b{color:var(--accent)}
+
+  main{display:flex;gap:16px;padding:16px;align-items:flex-start;max-width:1680px;margin:0 auto}
+  .board{flex:1;min-width:0;position:relative;background:#f6efdc;border:1px solid var(--line);
+    border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+  .stage{position:relative;overflow:hidden;touch-action:none}
+  #plan{position:relative;width:100%;aspect-ratio:1647/1098;transform-origin:50% 50%}
+  #plan svg{position:absolute;inset:0;width:100%;height:100%;display:block;user-select:none;-webkit-user-select:none}
+  #markers{position:absolute;inset:0;pointer-events:none}
+
+  /* ---------- 图纸样式 ---------- */
+  svg text{pointer-events:none}
+  .floor{fill:#b9d7e6}
+  .wall{fill:none;stroke:#8ba4b5;stroke-width:5}
+  .desk{fill:#ffffff;stroke:#94adc0;stroke-width:2.4}
+  .grid{stroke:#b6c8d4;stroke-width:1.6}
+  .room{fill:#cfe7d6;stroke:#b5524d;stroke-width:7}
+  .pantry{fill:#f2c052;stroke:#c99b3d;stroke-width:2.5}
+  .counter{fill:#e5ad3f;stroke:#b8862e;stroke-width:2}
+  .icon{fill:none;stroke:#6b5a2a;stroke-width:2}
+  .iconline{stroke:#b8862e;stroke-width:2}
+  .sketch{fill:none;stroke:#75909e;stroke-width:2.4;opacity:.55}
+  .flower{fill:none;stroke:#7b95a3;stroke-width:2;opacity:.5}
+  .doorline{fill:none;stroke:#7d95a5;stroke-width:2.2}
+  .doorgap{fill:#b9d7e6}
+  .xmark{stroke:#c0392b;stroke-width:5;stroke-linecap:round}
+  .lbl{font-family:Arial,Helvetica,sans-serif;font-weight:800;fill:#0d1114;text-anchor:middle;letter-spacing:.5px}
+  .lblbox{fill:#ffffff}
+  .lblbox.bd{stroke:#14181c;stroke-width:2.5}
+  .biglbl{font-family:Arial,Helvetica,sans-serif;font-weight:700;fill:#14181c;text-anchor:middle}
+  .roomlbl{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;
+    fill:#2e5c40;opacity:.75;letter-spacing:1.5px}
+
+  .seat{cursor:pointer}
+  .seat .back{fill:#e3ecf2;stroke:#89a1b4;stroke-width:2}
+  .seat .arm{fill:#eef4f8;stroke:#89a1b4;stroke-width:1.8}
+  .seat .cushion{fill:#fbfdfe;stroke:#7f99ad;stroke-width:2.2;transition:fill .15s,stroke .15s}
+  .seat .hit{fill:#000;fill-opacity:0}
+  .seat:hover .cushion{fill:#d9edfa;stroke:#2f7fb8}
+  .seat.sel .cushion{stroke:#2f7fb8;stroke-width:4}
+  .pulse{fill:none;stroke:#2f7fb8;stroke-width:5;transform-box:fill-box;transform-origin:center;
+    animation:pulse 1.1s ease-out infinite}
+  @keyframes pulse{0%{transform:scale(.45);opacity:.95}100%{transform:scale(2.4);opacity:0}}
+
+  /* ---------- 人员浮标 ---------- */
+  .marker{position:absolute;transform:translate(-50%,-100%);z-index:5;pointer-events:none}
+  .pin{pointer-events:auto;cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:5px;
+    background:var(--c,#2f7fb8);border:none;color:#fff;font-size:11.5px;font-weight:600;line-height:1;
+    font-family:inherit;padding:4px 9px 4px 5px;border-radius:999px;white-space:nowrap;
+    box-shadow:0 3px 10px rgba(10,25,40,.35);animation:bob 2.8s ease-in-out infinite;
+    animation-delay:var(--d,0s)}
+  .pin::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);
+    border:5px solid transparent;border-top:6px solid var(--c,#2f7fb8)}
+  .pin i{font-style:normal;display:flex;align-items:center;justify-content:center;
+    width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.28);font-size:10px;flex:none}
+  .pin b{font-weight:600;max-width:76px;overflow:hidden;text-overflow:ellipsis}
+  .pin:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .marker.enter .pin{animation:pop .28s cubic-bezier(.34,1.56,.64,1),bob 2.8s ease-in-out .3s infinite}
+  .marker.dim{opacity:.22;filter:grayscale(.8)}
+  .marker.hot .pin{outline:3px solid rgba(255,255,255,.9);outline-offset:1px}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3.5px)}}
+  @keyframes pop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
+
+  /* ---------- 编辑气泡 ---------- */
+  #pop{position:fixed;z-index:50;display:none;width:222px;padding:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);
+    transform:translate(-50%,calc(-100% - 16px))}
+  #pop.open{display:block}
+  #pop.below{transform:translate(-50%,18px)}
+  #pop::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);
+    border:8px solid transparent;border-top-color:var(--panel)}
+  #pop.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:var(--panel)}
+  .pop-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .pop-top span{font-size:12px;font-weight:600;color:var(--sub)}
+  #popX{border:none;background:none;color:var(--sub);font-size:16px;cursor:pointer;padding:0 4px;border-radius:6px}
+  #popX:hover{color:var(--ink)}
+  #popIn{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font-size:14px;
+    background:var(--bg);color:var(--ink);outline:none}
+  #popIn:focus{border-color:var(--accent)}
+  .pop-btns{display:flex;gap:8px;margin-top:9px}
+  .pop-btns button{flex:1;padding:6px 0;border-radius:8px;font-size:12.5px;cursor:pointer;
+    border:1px solid var(--line);background:var(--chip);color:var(--ink)}
+  .pop-btns .primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .pop-btns button:hover{filter:brightness(1.06)}
+  .pop-btns .del{color:var(--danger)}
+
+  /* ---------- 侧栏 ---------- */
+  .side{width:270px;flex:none}
+  .side-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
+    display:flex;flex-direction:column;max-height:calc(100vh - 130px);overflow:hidden}
+  .side-head{padding:12px 12px 8px;display:flex;gap:8px;align-items:center}
+  #q{flex:1;min-width:0;padding:8px 12px;border:1.5px solid var(--line);border-radius:10px;font-size:13px;
+    background:var(--bg);color:var(--ink);outline:none}
+  #q:focus{border-color:var(--accent)}
+  #colorBtn{flex:none;width:36px;height:36px;border-radius:10px;border:1.5px solid var(--line);
+    background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+  #colorBtn:hover{border-color:var(--accent)}
+  #colorDot{width:18px;height:18px;border-radius:50%}
+  .palette{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:2px 14px 12px;
+    border-bottom:1px solid var(--line);justify-items:center}
+  .palette[hidden]{display:none}
+  .sw{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid rgba(0,0,0,.1);padding:0}
+  .sw:hover{transform:scale(1.15)}
+  .sw.on{outline:2.5px solid var(--accent);outline-offset:2px}
+  .sw.custom{position:relative;display:block;overflow:hidden;
+    background:conic-gradient(#f33,#fc0,#3c3,#0cc,#36f,#c3f,#f33)}
+  .sw.custom::after{content:"";position:absolute;inset:6px;border-radius:50%;background:var(--panel)}
+  .sw.custom input{position:absolute;inset:0;opacity:0;cursor:pointer;z-index:1}
+  .list{flex:1;overflow-y:auto;padding:0 8px 8px;min-height:120px}
+  .zone-h{display:flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;
+    color:var(--sub);letter-spacing:1px;padding:10px 6px 4px}
+  .zone-h .zn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .zone-h em{font-style:normal;font-variant-numeric:tabular-nums}
+  .zedit{border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;
+    padding:0 4px;border-radius:4px;opacity:0;transition:opacity .15s}
+  .zone-h:hover .zedit,.zedit:focus-visible{opacity:1}
+  .zedit:hover{color:var(--accent)}
+  .zinput{flex:1;min-width:0;font-size:11.5px;font-weight:600;font-family:inherit;color:var(--ink);
+    background:var(--bg);border:1.5px solid var(--accent);border-radius:6px;padding:2px 6px;
+    letter-spacing:1px;outline:none}
+  .row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border:none;
+    background:none;border-radius:9px;cursor:pointer;color:var(--ink);font-size:13px;font-family:inherit}
+  .row:hover{background:var(--chip)}
+  .row .dot{width:20px;height:20px;border-radius:50%;color:#fff;font-size:10.5px;display:flex;
+    align-items:center;justify-content:center;flex:none}
+  .row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  .row .sid{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .empty{padding:26px 14px;text-align:center;color:var(--sub);font-size:12.5px;line-height:1.8}
+  .side-foot{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+  .side-foot .btn{flex:1;text-align:center;padding:7px 0;border-radius:9px;font-size:12.5px;cursor:pointer;
+    border:1px solid var(--line);background:var(--chip);color:var(--ink);font-family:inherit}
+  .side-foot .btn:hover{filter:brightness(1.05)}
+  .side-foot .btn.danger{color:var(--danger)}
+  .side-foot .btn.danger[data-arm="1"]{background:var(--danger);border-color:var(--danger);color:#fff;font-weight:600}
+
+  #toast{position:fixed;left:50%;bottom:26px;z-index:99;pointer-events:none;
+    transform:translateX(-50%) translateY(16px);opacity:0;transition:opacity .25s,transform .25s;
+    background:var(--ink);color:var(--panel);font-size:13px;padding:9px 20px;border-radius:999px;
+    box-shadow:0 6px 20px rgba(10,20,30,.3);max-width:80vw}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  #modal{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+    background:rgba(10,20,30,.45)}
+  #modal[hidden]{display:none}
+  .modal-card{width:min(480px,92vw);max-height:82vh;overflow:auto;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .modal-head b{font-size:14px}
+  #modalX{border:none;background:none;font-size:18px;color:var(--sub);cursor:pointer;border-radius:6px;padding:0 6px}
+  #modalX:hover{color:var(--ink)}
+  .modal-body .sec{margin-bottom:16px}
+  .modal-body .sec:last-child{margin-bottom:4px}
+  .modal-body h4{margin:0 0 6px;font-size:12px;color:var(--sub);letter-spacing:1px}
+  .modal-body textarea{width:100%;height:150px;resize:vertical;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;
+    background:var(--bg);color:var(--ink);border:1.5px solid var(--line);border-radius:8px;padding:8px;outline:none}
+  .modal-body textarea:focus{border-color:var(--accent)}
+  .mrow{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .mbtn{padding:7px 14px;border-radius:8px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);
+    background:var(--chip);color:var(--ink);font-family:inherit}
+  .mbtn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .mbtn:hover{filter:brightness(1.06)}
+  .mhint{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.6}
+
+  @media print{
+    header,.side,.zoombar,.hint,#pop,#toast,#modal{display:none!important}
+    body{background:#fff}
+    main{display:block;padding:0;max-width:none}
+    .board{border:none;box-shadow:none;border-radius:0;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #plan{transform:none!important}
+  }
+  @page{size:A4 landscape;margin:8mm}
+
+  /* ---------- 悬浮控件 ---------- */
+  .zoombar{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px;z-index:10}
+  .zoombar button{width:36px;height:36px;border-radius:10px;border:1px solid #cfd8de;cursor:pointer;
+    background:rgba(255,255,255,.92);color:#22303a;font-size:16px;line-height:1;
+    box-shadow:0 2px 8px rgba(20,40,60,.18)}
+  .zoombar button:hover{background:#fff}
+  .hint{position:absolute;left:14px;bottom:14px;z-index:10;background:rgba(255,255,255,.88);
+    color:#44555f;font-size:12px;padding:6px 13px;border-radius:999px;border:1px solid #d8dfe4;
+    box-shadow:0 2px 8px rgba(20,40,60,.14);pointer-events:none}
+
+  button:focus-visible,.row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  @media (max-width:960px){
+    main{flex-direction:column}
+    .side{width:100%}
+    .side-card{max-height:400px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .pin,.marker.enter .pin{animation:none}
+    .pulse{animation:none;opacity:0}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tt">
+    <h1>9F 办公区 · 工位分布图</h1>
+    <p>点击平面图上任意座位填写人员姓名 · 数据自动保存在本地浏览器</p>
+  </div>
+  <div class="chips">
+    <div class="chip">总工位<b id="stT">0</b></div>
+    <div class="chip ok">已安排<b id="stU">0</b></div>
+    <div class="chip">空位<b id="stF">0</b></div>
+  </div>
+</header>
+
+<main>
+  <div class="board">
+    <div class="stage" id="stage">
+      <div id="plan">
+        <svg id="svg" viewBox="0 0 1647 1098" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="markers"></div>
+      </div>
+    </div>
+    <div class="zoombar">
+      <button id="zin" title="放大">＋</button>
+      <button id="zout" title="缩小">－</button>
+      <button id="zreset" title="复位">⟲</button>
+    </div>
+    <div class="hint" id="hint">💡 点击任意座位,填写人员姓名</div>
+  </div>
+
+  <aside class="side">
+    <div class="side-card">
+      <div class="side-head">
+        <input id="q" type="search" placeholder="搜索姓名或座位号…">
+        <button id="colorBtn" title="统一更换浮标颜色"><span id="colorDot"></span></button>
+      </div>
+      <div id="palette" class="palette" hidden></div>
+      <div class="list" id="list"></div>
+      <div class="side-foot">
+        <button class="btn" id="btnExport">导出</button>
+        <button class="btn" id="btnImport">导入</button>
+        <button class="btn danger" id="btnClear">清空</button>
+      </div>
+      <input id="fileIn" type="file" accept=".json,application/json" hidden>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" role="status"></div>
+
+<div id="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><b id="modalTitle"></b><button id="modalX" aria-label="关闭">×</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<div id="pop">
+  <div class="pop-top"><span id="popSeat"></span><button id="popX" aria-label="关闭">×</button></div>
+  <input id="popIn" placeholder="输入姓名后回车" maxlength="20" autocomplete="off">
+  <div class="pop-btns">
+    <button class="primary" id="popSave">保存</button>
+    <button class="del" id="popDel">清空座位</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const VW=1647, VH=1098, KEY='seatmap-9f-v1';
+const ZONES={A:'工位区 A',B:'工位区 B',C:'工位区 C',D:'工位区 D',T:'圆桌区',G:'右侧方桌·上',
+  E:'长桌 E',F:'长桌 F',N:'会议室 09N',S:'工位 09-161',H:'工位区 H',P:'会议室 09M',
+  I:'右侧方桌·中',J:'右侧方桌·下',U:'LAB 工位·左',V:'LAB 工位·右'};
+/* 计入"总工位"的区域(圆桌、会议室不算工位,但仍可安排人) */
+const WORK={A:1,B:1,C:1,D:1,E:1,F:1,G:1,S:1,H:1,I:1,J:1,U:1,V:1};
+/* 分区自定义命名 */
+const ZKEY='seatmap-9f-zonenames';
+let zoneNames={};
+try{zoneNames=JSON.parse(localStorage.getItem(ZKEY))||{};}catch(e){zoneNames={};}
+const zoneName=z=>zoneNames[z]||ZONES[z];
+const PALETTE=['#e15b64','#e0812f','#c99a12','#69a338','#2ba187','#2e9bd6',
+  '#4f74d9','#7b61d9','#b558c9','#d34f9c','#8a6d4f','#5b7a8c'];
+
+/* ================= 图纸生成 ================= */
+const seats=[], counters={};
+function addSeat(z,x,y,rot){const n=(counters[z]=(counters[z]||0)+1);seats.push({id:z+'-'+n,zone:z,x,y,rot});}
+const R=(x,y,w,h,cls,rx)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx==null?3:rx}" class="${cls}"/>`;
+const L=(x1,y1,x2,y2,cls)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${cls}"/>`;
+const C=(cx,cy,r,cls)=>`<circle cx="${cx}" cy="${cy}" r="${r}" class="${cls}"/>`;
+let FURN='', LBL='', DECOR='';
+
+/* 一人工位 = 50×100 图纸单位(等比还原 60cm×120cm,1 单位≈1.2cm),全图唯一基准 */
+const UD=50, UW=100, GAP=23;
+/* 左右对坐工位组:两列桌深 50 拼成 100 宽,每人占高 100 */
+function bank(z,x,y,rows){
+  const h=rows*UW;
+  FURN+=R(x,y,UD*2,h,'desk')+L(x+UD,y,x+UD,y+h,'grid');
+  for(let i=1;i<rows;i++)FURN+=L(x,y+i*UW,x+UD*2,y+i*UW,'grid');
+  for(let r=0;r<rows;r++){const cy=y+(r+.5)*UW;
+    addSeat(z,x-GAP,cy,0);addSeat(z,x+UD*2+GAP,cy,180);}
+}
+/* 上下对坐长桌:每人占宽 100、桌深 50,两排拼成 100 高 */
+function longTable(z,x,y,cols){
+  const w=cols*UW;
+  FURN+=R(x,y,w,UD*2,'desk',4)+L(x,y+UD,x+w,y+UD,'grid');
+  for(let i=1;i<cols;i++)FURN+=L(x+i*UW,y,x+i*UW,y+UD*2,'grid');
+  for(let c=0;c<cols;c++){const cx=x+(c+.5)*UW;
+    addSeat(z,cx,y-GAP,90);addSeat(z,cx,y+UD*2+GAP,270);}
+}
+function labelBox(x,y,txt,fs,bd){
+  const w=txt.length*fs*.66+16, h=fs+10;
+  LBL+=`<rect x="${x-w/2}" y="${y-h/2}" width="${w}" height="${h}" class="lblbox${bd?' bd':''}"/>`
+     +`<text x="${x}" y="${y+fs*.35}" font-size="${fs}" class="lbl">${txt}</text>`;
+}
+const tsq=(x,y,s,rot)=>`<rect x="${-s/2}" y="${-s/2}" width="${s}" height="${s}" class="sketch" transform="translate(${x} ${y}) rotate(${rot})"/>`;
+
+/* --- 顶部四组工位 A/B/C/D:每组 4 座 --- */
+bank('A',450,62,2);
+bank('B',682,62,2);
+bank('C',914,62,2);
+bank('D',1146,62,2);
+
+/* --- 左上圆桌 T --- */
+FURN+=C(205,182,70,'desk');
+[[225],[105],[340]].forEach(a=>{const r=a[0]*Math.PI/180;
+  FURN+=L(205,182,205+70*Math.cos(r),182+70*Math.sin(r),'grid');});
+addSeat('T',138,115,45); addSeat('T',180,274,285); addSeat('T',294,150,160);
+
+/* --- 右侧三张桌 G/I/J:每张 4 座(上下各 2)--- */
+longTable('G',1372,167,2);
+longTable('I',1372,405,2);
+longTable('J',1372,625,2);
+
+/* --- 左侧长桌 E / F --- */
+longTable('E',82,388,3);
+longTable('F',82,604,3);
+
+/* --- 会议室 09N + 茶水间 --- */
+const ROOMS =
+  R(468,330,272,258,'room',2)
+ +R(686,323,46,14,'doorgap',0)
+ +`<path class="doorline" d="M732,334 A46 46 0 0 1 686,380 M732,334 L732,380"/>`
+ +R(468,588,272,134,'pantry',2)
+ +R(474,594,260,44,'counter',2)
+ +R(486,602,32,30,'icon',3)+C(566,617,11,'icon')
+ +R(606,604,22,26,'icon',2)+R(634,604,22,26,'icon',2)
+ +L(540,596,540,638,'iconline')+L(594,596,594,638,'iconline')+L(668,596,668,638,'iconline')
+ +R(1058,534,244,232,'room',2)
+ +R(1222,759,46,14,'doorgap',0)
+ +`<path class="doorline" d="M1222,758 A46 46 0 0 0 1268,712 M1222,758 L1268,758"/>`;
+FURN+=R(569,392,70,148,'desk',5);
+addSeat('N',604,369,90);
+addSeat('N',546,429,0);  addSeat('N',662,429,180);
+addSeat('N',546,503,0);  addSeat('N',662,503,180);
+addSeat('N',604,563,270);
+LBL+=`<text x="482" y="350" class="roomlbl">CONFERENCE ROOM 09N</text>`;
+LBL+=`<text x="592" y="672" font-size="32" class="biglbl" letter-spacing="3">PANTRY</text>`;
+
+/* --- 中部工位 09-161 (S):8 座 --- */
+bank('S',857,330,4);
+
+/* --- 右中工位 H:4 座,顶部与 09-161 平齐,居中压在 09M 正上方、桌尾紧贴房间外墙 --- */
+bank('H',1130,330,2);
+
+/* --- 会议室 09M (P) --- */
+FURN+=C(1180,664,38,'desk')+C(1180,664,5,'grid');
+addSeat('P',1120,664,0); addSeat('P',1240,664,180);
+addSeat('P',1180,606,90); addSeat('P',1180,722,270);
+LBL+=`<text x="1070" y="556" class="roomlbl">CONFERENCE ROOM 09M</text>`;
+
+/* --- LAB 工位 U / V:各 4 座 --- */
+bank('U',950,845,2);
+bank('V',1190,845,2);
+
+/* --- 装饰:休闲区草图 / break-out / 花草 / 门 / 楼梯 --- */
+DECOR+=tsq(636,830,58,35)+tsq(603,922,54,15)+tsq(672,1000,52,6)+C(706,955,16,'sketch')
+     +`<rect x="796" y="846" width="86" height="152" rx="12" class="sketch"/>`
+     +L(796,897,882,897,'sketch')+L(796,948,882,948,'sketch')
+     +tsq(1428,878,58,40)+tsq(1543,892,54,-25)
+     +C(1464,992,34,'sketch')+C(1464,992,7,'sketch')+tsq(1550,1000,46,-45);
+[[282,60,1.1,0],[108,86,.9,40],[78,398,1,-30],[78,648,1,25],[935,768,1.1,15],
+ [1580,652,1,0],[768,1040,1,70],[1418,850,.9,30]].forEach(f=>{
+  DECOR+=`<use href="#flower" transform="translate(${f[0]} ${f[1]}) rotate(${f[3]}) scale(${f[2]})"/>`;});
+DECOR+=`<path class="doorline" d="M384,44 A64 64 0 0 0 320,108 M320,44 L320,108"/>`
+     +`<path class="doorline" d="M498,1062 A62 62 0 0 1 560,1000 M560,1062 L560,1000"/>`
+     +R(104,283,236,50,'hatchbox',2)+R(104,758,236,50,'hatchbox',2);
+
+/* --- 座位 SVG --- */
+function chairSvg(s){
+  return `<g class="seat" data-id="${s.id}" transform="translate(${s.x} ${s.y}) rotate(${s.rot})">`
+   +`<title>${s.id} · ${zoneName(s.zone)}</title>`
+   +`<rect class="back" x="-16.5" y="-13" width="6" height="26" rx="3"/>`
+   +`<rect class="arm" x="-13" y="-17.5" width="18" height="5" rx="2.5"/>`
+   +`<rect class="arm" x="-13" y="12.5" width="18" height="5" rx="2.5"/>`
+   +`<rect class="cushion" x="-11.5" y="-12" width="24" height="24" rx="8"/>`
+   +`<circle class="hit" r="22"/></g>`;
+}
+
+const svg=document.getElementById('svg');
+svg.innerHTML=
+`<defs>
+  <pattern id="ruled" width="12" height="34" patternUnits="userSpaceOnUse">
+    <rect width="12" height="34" fill="#f6efdc"/>
+    <line x1="0" y1="33.5" x2="12" y2="33.5" stroke="#e7ddc2" stroke-width="1.6"/>
+  </pattern>
+  <pattern id="plank" width="60" height="27" patternUnits="userSpaceOnUse">
+    <line x1="0" y1="26" x2="60" y2="26" stroke="#93b7cc" stroke-width="1.6"/>
+  </pattern>
+  <pattern id="hatch" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="10" y1="0" x2="10" y2="20" stroke="#7d95a5" stroke-width="2.5"/>
+  </pattern>
+  <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+    <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#47617a" flood-opacity="0.3"/>
+  </filter>
+  <g id="flower">
+    <ellipse class="flower" cx="13" cy="0" rx="12" ry="4.5"/>
+    <ellipse class="flower" cx="13" cy="0" rx="12" ry="4.5" transform="rotate(72)"/>
+    <ellipse class="flower" cx="13" cy="0" rx="12" ry="4.5" transform="rotate(144)"/>
+    <ellipse class="flower" cx="13" cy="0" rx="12" ry="4.5" transform="rotate(216)"/>
+    <ellipse class="flower" cx="13" cy="0" rx="12" ry="4.5" transform="rotate(288)"/>
+    <circle class="flower" r="2.5"/>
+  </g>
+  <style>.hatchbox{fill:url(#hatch);stroke:#8ba4b5;stroke-width:2}</style>
+</defs>
+<rect x="0" y="0" width="${VW}" height="${VH}" fill="url(#ruled)"/>
+<rect x="55" y="42" width="1540" height="1022" rx="58" class="floor"/>
+<rect x="55" y="42" width="1540" height="1022" rx="58" fill="url(#plank)" opacity=".5"/>
+<rect x="55" y="42" width="1540" height="1022" rx="58" class="wall"/>
+<g>${DECOR}</g>
+<g>${ROOMS}</g>
+<g filter="url(#ds)">${FURN}</g>
+<g id="seatlayer">${seats.map(chairSvg).join('')}</g>
+<g>${LBL}</g>
+<g id="fx"></g>`;
+
+/* ================= 状态与交互 ================= */
+let data={};
+try{data=JSON.parse(localStorage.getItem(KEY))||{};}catch(e){data={};}
+const persist=()=>localStorage.setItem(KEY,JSON.stringify(data));
+const seatById={}; seats.forEach(s=>seatById[s.id]=s);
+for(const k in data){if(!seatById[k]||!data[k])delete data[k];}
+persist();
+const seatEls={};
+document.querySelectorAll('.seat').forEach(el=>seatEls[el.dataset.id]=el);
+
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CKEY='seatmap-9f-pincolor', RAINBOW='conic-gradient(#e15b64,#e0812f,#c99a12,#69a338,#2ba187,#2e9bd6,#7b61d9,#d34f9c,#e15b64)';
+let pinColor=localStorage.getItem(CKEY)||'#2e9bd6';
+function colorOf(name){
+  if(pinColor==='multi'){let h=0;for(const ch of name)h=(h*31+ch.codePointAt(0))>>>0;return PALETTE[h%PALETTE.length];}
+  return pinColor;
+}
+
+const markersEl=document.getElementById('markers'),listEl=document.getElementById('list'),
+  hintEl=document.getElementById('hint'),qEl=document.getElementById('q');
+const stT=document.getElementById('stT'),stU=document.getElementById('stU'),stF=document.getElementById('stF');
+
+function renderState(enterId){
+  let html='';
+  seats.forEach((s,i)=>{
+    const name=data[s.id]; const el=seatEls[s.id];
+    const cushion=el.querySelector('.cushion');
+    el.classList.toggle('occ',!!name);
+    if(name){const c=colorOf(name);cushion.style.fill=c;cushion.style.fillOpacity=.38;cushion.style.stroke=c;}
+    else{cushion.style.fill='';cushion.style.fillOpacity='';cushion.style.stroke='';}
+    if(name){
+      const c=colorOf(name);
+      html+=`<div class="marker${s.id===enterId?' enter':''}" data-id="${s.id}"
+        style="left:${(s.x/VW*100).toFixed(3)}%;top:${((s.y-9)/VH*100).toFixed(3)}%">
+        <button class="pin" style="--c:${c};--d:-${(i%7)*.4}s" title="${esc(name)} · ${s.id}">
+        <i>${esc(name.charAt(0))}</i><b>${esc(name)}</b></button></div>`;
+    }
+  });
+  markersEl.innerHTML=html;
+  const work=seats.filter(s=>WORK[s.zone]);
+  const used=work.filter(s=>data[s.id]).length;
+  stT.textContent=work.length; stU.textContent=used; stF.textContent=work.length-used;
+  hintEl.style.display=Object.keys(data).some(id=>seatById[id])?'none':'';
+  renderList(); applySearch();
+}
+
+function renderList(){
+  const q=qEl.value.trim().toLowerCase();
+  let html='',total=0;
+  for(const z of Object.keys(ZONES)){
+    const rows=seats.filter(s=>s.zone===z&&data[s.id])
+      .filter(s=>!q||data[s.id].toLowerCase().includes(q)||s.id.toLowerCase().includes(q)
+        ||zoneName(z).toLowerCase().includes(q));
+    if(!rows.length)continue;
+    total+=rows.length;
+    html+=`<div class="zone-h" data-z="${z}"><span class="zn">${esc(zoneName(z))}</span>`
+        +`<button class="zedit" title="重命名分区">✎</button><em>${rows.length}</em></div>`;
+    for(const s of rows){
+      const nm=data[s.id],c=colorOf(nm);
+      html+=`<button class="row" data-id="${s.id}"><span class="dot" style="background:${c}">${esc(nm.charAt(0))}</span>
+        <span class="nm">${esc(nm)}</span><span class="sid">${s.id}</span></button>`;
+    }
+  }
+  listEl.innerHTML=total?html:
+    `<div class="empty">${q?'没有匹配的人员':'还没有安排任何人员<br>点击平面图上的座位开始'}</div>`;
+}
+
+function applySearch(){
+  const q=qEl.value.trim().toLowerCase();
+  document.querySelectorAll('.marker').forEach(m=>{
+    const id=m.dataset.id,nm=(data[id]||'').toLowerCase();
+    m.classList.toggle('dim',!!q&&!nm.includes(q)&&!id.toLowerCase().includes(q));
+  });
+}
+
+/* ---- 编辑气泡 ---- */
+const pop=document.getElementById('pop'),popIn=document.getElementById('popIn'),
+  popSeat=document.getElementById('popSeat');
+let cur=null;
+function openPop(id){
+  const s=seatById[id]; if(!s)return;
+  cur=id;
+  document.querySelectorAll('.seat.sel').forEach(e=>e.classList.remove('sel'));
+  seatEls[id].classList.add('sel');
+  const r=svg.getBoundingClientRect();
+  let px=r.left+s.x/VW*r.width, py=r.top+s.y/VH*r.height;
+  pop.classList.toggle('below',py<200);
+  px=Math.max(126,Math.min(window.innerWidth-126,px));
+  pop.style.left=px+'px';
+  pop.style.top=(pop.classList.contains('below')?py+14:py-14)+'px';
+  popSeat.textContent=id+' · '+zoneName(s.zone);
+  popIn.value=data[id]||'';
+  pop.classList.add('open');
+  setTimeout(()=>popIn.focus(),0);
+}
+function closePop(){
+  pop.classList.remove('open');cur=null;
+  document.querySelectorAll('.seat.sel').forEach(e=>e.classList.remove('sel'));
+}
+function saveCur(){
+  if(!cur)return;
+  const name=popIn.value.trim(),id=cur,had=!!data[id];
+  if(name)data[id]=name;else delete data[id];
+  persist();closePop();renderState(name?id:null);
+  if(name)toast('已安排 '+name+' → '+id);
+  else if(had)toast('已清空 '+id);
+}
+document.getElementById('popSave').addEventListener('click',saveCur);
+document.getElementById('popDel').addEventListener('click',()=>{
+  if(cur){const id=cur;delete data[id];persist();closePop();renderState();toast('已清空 '+id);}});
+document.getElementById('popX').addEventListener('click',closePop);
+popIn.addEventListener('keydown',e=>{
+  if(e.isComposing||e.keyCode===229)return;
+  if(e.key==='Enter')saveCur();
+  if(e.key==='Escape')closePop();
+});
+document.addEventListener('pointerdown',e=>{
+  if(pop.classList.contains('open')&&!e.target.closest('#pop,.seat,.pin'))closePop();
+});
+window.addEventListener('resize',closePop);
+window.addEventListener('scroll',closePop,true);
+
+svg.addEventListener('click',e=>{
+  const g=e.target.closest('.seat');
+  if(g)openPop(g.dataset.id);
+});
+markersEl.addEventListener('click',e=>{
+  const m=e.target.closest('.marker');
+  if(m)openPop(m.dataset.id);
+});
+
+/* ---- 定位脉冲 ---- */
+const fx=document.getElementById('fx');
+function locate(id){
+  const s=seatById[id];if(!s)return;
+  fx.innerHTML=`<circle class="pulse" cx="${s.x}" cy="${s.y}" r="26"/>`;
+  setTimeout(()=>{fx.innerHTML='';},2400);
+  const m=markersEl.querySelector(`.marker[data-id="${id}"]`);
+  if(m){m.classList.add('hot');setTimeout(()=>m.classList.remove('hot'),2400);}
+}
+listEl.addEventListener('click',e=>{
+  const ed=e.target.closest('.zedit');
+  if(ed){startZoneEdit(ed.closest('.zone-h'));return;}
+  const row=e.target.closest('.row');
+  if(row)locate(row.dataset.id);
+});
+/* 分区就地重命名:回车/失焦保存,Esc 取消,清空则恢复默认名 */
+function startZoneEdit(h){
+  const z=h.dataset.z;
+  if(!z||h.querySelector('input'))return;
+  const zn=h.querySelector('.zn');
+  const inp=document.createElement('input');
+  inp.className='zinput';inp.value=zoneName(z);inp.maxLength=14;
+  zn.replaceWith(inp);inp.focus();inp.select();
+  let closed=false;
+  const done=save=>{
+    if(closed)return;closed=true;
+    if(save){
+      const v=inp.value.trim();
+      if(v&&v!==ZONES[z])zoneNames[z]=v;else delete zoneNames[z];
+      localStorage.setItem(ZKEY,JSON.stringify(zoneNames));
+      seats.forEach(s=>{if(s.zone===z){
+        const t=seatEls[s.id].querySelector('title');
+        if(t)t.textContent=s.id+' · '+zoneName(z);
+      }});
+      toast('分区已命名为「'+zoneName(z)+'」');
+    }
+    renderList();
+  };
+  inp.addEventListener('keydown',ev=>{
+    if(ev.isComposing||ev.keyCode===229)return;
+    if(ev.key==='Enter')done(true);
+    if(ev.key==='Escape')done(false);
+  });
+  inp.addEventListener('blur',()=>done(true));
+}
+qEl.addEventListener('input',()=>{renderList();applySearch();});
+
+/* ---- 缩放平移 ---- */
+const stage=document.getElementById('stage'),plan=document.getElementById('plan');
+let scale=1,tx=0,ty=0;
+function apply(){
+  const lx=stage.clientWidth*(scale-1)/2, ly=stage.clientHeight*(scale-1)/2;
+  tx=Math.max(-lx,Math.min(lx,tx)); ty=Math.max(-ly,Math.min(ly,ty));
+  plan.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`;
+}
+function setScale(v){scale=Math.max(1,Math.min(3,v));if(scale===1){tx=0;ty=0;}apply();closePop();}
+document.getElementById('zin').addEventListener('click',()=>setScale(scale*1.3));
+document.getElementById('zout').addEventListener('click',()=>setScale(scale/1.3));
+document.getElementById('zreset').addEventListener('click',()=>setScale(1));
+stage.addEventListener('wheel',e=>{
+  if(e.ctrlKey||e.metaKey){e.preventDefault();setScale(scale*(e.deltaY<0?1.12:0.9));}
+},{passive:false});
+let drag=null,dragged=false;
+stage.addEventListener('pointerdown',e=>{
+  if(e.target.closest('#pop'))return;
+  drag={x:e.clientX,y:e.clientY,tx,ty};dragged=false;
+});
+window.addEventListener('pointermove',e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(Math.abs(dx)+Math.abs(dy)>5)dragged=true;
+  if(scale>1&&dragged){tx=drag.tx+dx;ty=drag.ty+dy;apply();}
+});
+window.addEventListener('pointerup',()=>{drag=null;});
+stage.addEventListener('click',e=>{
+  if(dragged){e.stopPropagation();e.preventDefault();dragged=false;}
+},true);
+
+/* ---- 模态框 ---- */
+const modal=document.getElementById('modal'),modalBody=document.getElementById('modalBody'),
+  modalTitle=document.getElementById('modalTitle');
+function openModal(title,html){modalTitle.textContent=title;modalBody.innerHTML=html;modal.hidden=false;}
+function closeModal(){modal.hidden=true;modalBody.innerHTML='';}
+document.getElementById('modalX').addEventListener('click',closeModal);
+modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!modal.hidden)closeModal();});
+
+function copyText(t,ta){
+  const legacy=()=>{
+    if(ta){ta.focus();ta.select();}
+    try{document.execCommand('copy');toast('已复制到剪贴板');}
+    catch(e){toast('复制失败,请手动全选文本复制');}
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(t).then(()=>toast('已复制到剪贴板')).catch(legacy);
+  else legacy();
+}
+
+/* ---- 导出:JSON(复制/下载)+ PDF(打印) ---- */
+document.getElementById('btnExport').addEventListener('click',()=>{
+  const json=JSON.stringify(data,null,2);
+  openModal('导出',
+    `<div class="sec"><h4>JSON 数据</h4>
+      <textarea id="expTa" readonly>${esc(json)}</textarea>
+      <div class="mrow">
+        <button class="mbtn primary" id="expCopy">复制 JSON</button>
+        <button class="mbtn" id="expDl">下载 .json 文件</button>
+      </div>
+      <div class="mhint">若「下载」无反应(当前预览环境限制),点「复制」后粘贴到任意文件保存即可。</div>
+    </div>
+    <div class="sec"><h4>PDF</h4>
+      <div class="mrow"><button class="mbtn primary" id="expPdf">打印 / 另存为 PDF</button></div>
+      <div class="mhint">会打开系统打印窗口,打印机选「另存为 PDF」,方向横向。若打印窗口没有弹出,
+      说明当前预览环境限制了打印,部署到正式网址后即可正常使用。</div>
+    </div>`);
+  document.getElementById('expCopy').addEventListener('click',()=>{
+    copyText(json,document.getElementById('expTa'));
+  });
+  document.getElementById('expDl').addEventListener('click',()=>{
+    try{
+      const blob=new Blob([json],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download='工位安排.json';
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      toast('已尝试下载,若无反应请改用「复制 JSON」');
+    }catch(e){toast('当前环境不允许下载,请用「复制 JSON」');}
+  });
+  document.getElementById('expPdf').addEventListener('click',()=>{
+    closeModal();setScale(1);
+    setTimeout(()=>{try{window.print();}catch(e){toast('当前环境不支持打印,部署到正式网址后可用');}},150);
+  });
+});
+
+/* ---- 导入:粘贴 JSON / 选文件 ---- */
+function applyImport(text){
+  try{
+    const obj=JSON.parse(text);
+    if(typeof obj!=='object'||!obj||Array.isArray(obj))throw 0;
+    const next={};let n=0;
+    for(const k in obj){if(seatById[k]&&typeof obj[k]==='string'&&obj[k].trim()){next[k]=obj[k].trim();n++;}}
+    data=next;persist();renderState();closeModal();
+    toast('已导入 '+n+' 条人员安排');
+  }catch(e){toast('内容不是有效的 JSON,格式应为 {"座位号":"姓名"}');}
+}
+document.getElementById('btnImport').addEventListener('click',()=>{
+  openModal('导入',
+    `<div class="sec"><h4>粘贴 JSON</h4>
+      <textarea id="impTa" placeholder='{"A-1":"张三","S-2":"李四"}'></textarea>
+      <div class="mrow">
+        <button class="mbtn primary" id="impGo">导入</button>
+        <button class="mbtn" id="impFile">从文件选择…</button>
+      </div>
+      <div class="mhint">格式为 {"座位号":"姓名"},即「导出」得到的内容;导入会整体替换当前安排。
+      若「从文件选择」无反应,直接把文件内容粘贴进来即可。</div>
+    </div>`);
+  document.getElementById('impGo').addEventListener('click',()=>{
+    applyImport(document.getElementById('impTa').value);
+  });
+  document.getElementById('impFile').addEventListener('click',()=>fileIn.click());
+});
+const fileIn=document.getElementById('fileIn');
+fileIn.addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>applyImport(rd.result);
+  rd.readAsText(f);e.target.value='';
+});
+/* 清空全部:页内二次确认(沙箱里 confirm 弹窗不可用) */
+const btnClear=document.getElementById('btnClear');
+btnClear.addEventListener('click',()=>{
+  if(btnClear.dataset.arm==='1'){
+    btnClear.dataset.arm='';btnClear.textContent='清空';
+    data={};persist();renderState();toast('已清空全部人员');
+  }else{
+    btnClear.dataset.arm='1';btnClear.textContent='再点一次确认';
+    clearTimeout(btnClear._t);
+    btnClear._t=setTimeout(()=>{btnClear.dataset.arm='';btnClear.textContent='清空';},2600);
+  }
+});
+
+/* 浮标颜色:统一换色 / 按姓名多彩 */
+const colorBtn=document.getElementById('colorBtn'),colorDot=document.getElementById('colorDot'),
+  paletteEl=document.getElementById('palette');
+function renderPalette(){
+  const isCustom=pinColor!=='multi'&&PALETTE.indexOf(pinColor)<0;
+  let html=`<button class="sw${pinColor==='multi'?' on':''}" data-c="multi" title="按姓名多彩" style="background:${RAINBOW}"></button>`;
+  for(const c of PALETTE)html+=`<button class="sw${pinColor===c?' on':''}" data-c="${c}" style="background:${c}"></button>`;
+  html+=`<label class="sw custom${isCustom?' on':''}" title="自定义颜色(色盘)">
+    <input type="color" id="customColor" value="${isCustom?pinColor:'#2e9bd6'}"></label>`;
+  paletteEl.innerHTML=html;
+  colorDot.style.background=pinColor==='multi'?RAINBOW:pinColor;
+}
+colorBtn.addEventListener('click',()=>{paletteEl.hidden=!paletteEl.hidden;});
+paletteEl.addEventListener('click',e=>{
+  const b=e.target.closest('button.sw');if(!b)return;
+  pinColor=b.dataset.c;localStorage.setItem(CKEY,pinColor);
+  renderPalette();renderState();
+  toast(pinColor==='multi'?'浮标已切换为按姓名多彩':'浮标颜色已统一更换');
+});
+/* 自定义色盘:拖动实时预览,松手后定格 */
+paletteEl.addEventListener('input',e=>{
+  if(e.target.id!=='customColor')return;
+  pinColor=e.target.value;localStorage.setItem(CKEY,pinColor);
+  colorDot.style.background=pinColor;renderState();
+});
+paletteEl.addEventListener('change',e=>{
+  if(e.target.id!=='customColor')return;
+  renderPalette();toast('浮标已换成自定义颜色 '+pinColor);
+});
+renderPalette();
+
+/* 提示条 */
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+renderState();
+})();
+</script>
+</body>
+</html>
